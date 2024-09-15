@@ -3,7 +3,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from PIL import Image
-from typing import List, Union
+from typing import Any, List
 
 from Annotation import Annotation, BoundingBox, parse_xml_image_annotations
 
@@ -16,12 +16,18 @@ def show_image(image_path: Path):
     image.show()
 
 
-def show_image_and_annotations(image_path: Path, annotations: List[Annotation]):
+def show_image_on_path_with_annotations(
+    image_path: Path, annotations: List[Annotation]
+):
     if not image_path.exists():
         exit(f"Image not found: {image_path}. Aborting.")
 
     image = Image.open(image_path)
 
+    show_image_with_annotations(image, annotations)
+
+
+def show_image_with_annotations(image: Any, annotations: List[Annotation]):
     # Create a figure and axis
     fig, ax = plt.subplots()
     # Display the image
@@ -98,4 +104,4 @@ if __name__ == "__main__":
 
     image_path = PROJECT_DIR / f"Datasets/train_val/JPEGImages/{im_name}"
     annotations = parse_xml_image_annotations(annotation_path)
-    show_image_and_annotations(image_path, annotations)
+    show_image_on_path_with_annotations(image_path, annotations)

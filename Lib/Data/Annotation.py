@@ -9,7 +9,7 @@ from strenum import StrEnum
 class InvalidBoundingBoxException(Exception):
     """Custom exception thrown when the bounding box parsed from annotations is invalid.
 
-    Bounding box VALID if 0 <= x_min < x_max <= image_width and 0 <= y_min < y_max < image_height.
+    Bounding box is considered VALID if 0 <= x_min < x_max <= image_width and 0 <= y_min < y_max < image_height.
     """
 
     pass
@@ -86,18 +86,6 @@ class Annotation:
     bbox: BoundingBox
     image_properties: ImageProperties
 
-    def _bbox_is_valid(self) -> bool:
-        """Verify bounding box
-
-        Return:
-            - True if 0 <= x_min < x_max <= image_width and 0 <= y_min < y_max <= image_height
-            - False otherwise.
-        """
-        return (
-            0 <= self.bbox.x_min < self.bbox.x_max <= self.image_properties.width
-            and 0 <= self.bbox.y_min < self.bbox.y_max <= self.image_properties.height
-        )
-
     def __init__(
         self, category: Category, bbox: BoundingBox, image_properties: ImageProperties
     ):
@@ -115,10 +103,24 @@ class Annotation:
                 f"Annotations for file {self.image_properties.name} contain an invalid bounding box: {self.bbox}."
             )
 
+    def _bbox_is_valid(self) -> bool:
+        """Verify bounding box
+
+        Return:
+            - True if 0 <= x_min < x_max <= image_width and 0 <= y_min < y_max <= image_height
+            - False otherwise.
+        """
+        return (
+            0 <= self.bbox.x_min < self.bbox.x_max <= self.image_properties.width
+            and 0 <= self.bbox.y_min < self.bbox.y_max <= self.image_properties.height
+        )
+
 
 def parse_xml_image_annotations(annotation_path: Path) -> List[Annotation]:
-    annotations = []
+    if not annotation_path.exists():
+        raise FileNotFoundError
 
+    annotations = []
     root = etree.parse(annotation_path).getroot()
 
     im_name = root.find("filename").text
