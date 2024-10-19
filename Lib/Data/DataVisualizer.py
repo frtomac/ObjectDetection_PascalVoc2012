@@ -8,6 +8,20 @@ from typing import Any, List
 from Annotation import Annotation, BoundingBox, parse_xml_image_annotations
 
 
+COLOR = {
+    "Red": (255, 0, 0),
+    "Green": (0, 255, 0),
+    "Blue": (0, 0, 255),
+    "Cyan": (0, 255, 255),
+    "Magenta": (255, 0, 255),
+    "Yellow": (255, 255, 0),
+    "Black": (0, 0, 0),
+    "White": (255, 255, 255),
+    "Orange": (255, 165, 0),
+    "Purple": (128, 0, 128),
+}
+
+
 def show_image(image_path: Path):
     if not image_path.exists():
         exit(f"Image not found: {image_path}. Aborting.")
@@ -53,6 +67,22 @@ def show_image_with_annotations(image: Any, annotations: List[Annotation]):
             fontsize=12,
             bbox=dict(facecolor="red", alpha=0.5),
         )
+
+    plt.show()
+
+
+def show_annotations_on_image_with_grid_and_associated_anchors(
+    img, anchor_annotation_pairs, grid_cols, grid_rows
+):
+    # Create a figure and axis
+    fig, ax = plt.subplots()
+    # Display the image
+    ax.imshow(img)
+
+    # Add grid on image
+    ax.grid(which="major", axis="both", linestyle="-", color=COLOR["Black"])
+    ax.set_xticks(range(0, img.shape[1], grid_cols))  # Adjust the step size as needed
+    ax.set_yticks(range(0, img.shape[0], grid_rows))  # Adjust the step size as needed
 
     plt.show()
 
