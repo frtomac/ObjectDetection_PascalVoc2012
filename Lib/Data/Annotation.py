@@ -65,8 +65,8 @@ class BoundingBox:
     y_min: int
     x_max: int
     y_max: int
-    width: int
-    height: int
+    width: int = None
+    height: int = None
 
     def __init__(self, x_min, y_min, x_max, y_max):
         self.x_min = x_min

@@ -17,13 +17,15 @@ from Lib.Data.DataVisualizer import show_image_with_annotations
 
 CATEGORIES_IDS = {ctg.value: i for i, ctg in enumerate(Category)}
 
+sizes = [73, 83, 93]
+
 
 def _default_anchor_widths():
-    return [7, 11, 13]
+    return sizes  # [3, 15, 7]
 
 
 def _default_anchor_heights():
-    return [7, 11, 13]
+    return sizes  # [3, 5, 7]
 
 
 @dataclass
@@ -41,8 +43,8 @@ class GroundTruthGenerationSettings:
     generate_ground_truth: bool = True
     overwrite_existing_ground_truth: bool = True
     anchor_association_iou_threshold: float = 0.35
-    grid_rows: int = 9
-    grid_cols: int = 9
+    grid_rows: int = 3
+    grid_cols: int = 3
     input_image_width: int = 180
     input_image_height: int = 180
     anchor_widths: List[int] = field(default_factory=_default_anchor_widths)
@@ -51,10 +53,10 @@ class GroundTruthGenerationSettings:
     mu_y: float = 0.0
     mu_w: float = 0.0
     mu_h: float = 0.0
-    sigma_x: float = 0.0
-    sigma_y: float = 0.0
-    sigma_w: float = 0.0
-    sigma_h: float = 0.0
+    sigma_x: float = 0.1
+    sigma_y: float = 0.1
+    sigma_w: float = 0.2
+    sigma_h: float = 0.2
 
     def __post_init__(self):
         self._verify_and_initialize_gt_generation_settings()
@@ -85,6 +87,7 @@ class GroundTruthGenerationSettings:
 
 
 class PascalVocDataset(Dataset):
+    # TODO: write tests! Some class methods are quite tricky and error-prone.
     def __init__(
         self,
         dataset_path: Path,
@@ -124,6 +127,7 @@ class PascalVocDataset(Dataset):
 
         img = Image.open(img_path)
         if self.transform:
+            # TODO: labels need to be transformed as well!
             img = self.transform(img)
 
         return img, label
@@ -169,7 +173,18 @@ class PascalVocDataset(Dataset):
         TODO: update this doc-string.
         For each object in each image, we calculate ground truth generated for that object.
         """
+        # TODO: if transforms are set, ground truth will also need to be transformed.
+        negative_anchor_gt = np.zeros(
+            1 + 4 + self.ground_truth_generation_settings.num_classes
+        )
+        total_num_anchors = (
+            self.ground_truth_generation_settings.grid_cols
+            * self.ground_truth_generation_settings.grid_rows
+            * self.ground_truth_generation_settings.num_anchors
+        )
+
         ground_truths = []
+        i = 0
         for labels in self.img_labels:  # labels = annotations for one image
             anchors_gt_boxes_with_categories = self.find_anchor_annotation_associations(
                 labels
@@ -178,14 +193,7 @@ class PascalVocDataset(Dataset):
                 []
             )  # (1 + 4 + num_classes) * list of size num_anchors * grid_rows * grid_cols
 
-            negative_anchor_gt = np.zeros(
-                1 + 4 + self.ground_truth_generation_settings.num_classes
-            )
-            total_num_anchors = (
-                self.ground_truth_generation_settings.grid_cols
-                * self.ground_truth_generation_settings.grid_rows
-                * self.ground_truth_generation_settings.num_anchors
-            )
+            # Calculate the ground truth vector for image
             for anchor_idx in range(total_num_anchors):
                 if anchor_idx not in anchors_gt_boxes_with_categories.keys():
                     img_gt.extend(negative_anchor_gt)
@@ -212,7 +220,25 @@ class PascalVocDataset(Dataset):
                 img_gt.extend(anchor_offset)
                 img_gt.extend(class_confidences)
 
-                ground_truths.append(img_gt)
+            ground_truths.append(img_gt)
+            # if i < 1:
+            #     from Lib.Data.DataVisualizer import (
+            #         show_annotations_on_image_with_grid_and_associated_anchors,
+            #     )
+
+            #     img_dir = Path(
+            #         "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\toy_set\\JPEGImages"
+            #     )
+            #     img = Image.open(img_dir / labels[0].image_properties.name)
+            #     if self.transform:
+            #         img = self.transform(img)
+            #     show_annotations_on_image_with_grid_and_associated_anchors(
+            #         img,
+            #         anchor_annotation_pairs=anchors_gt_boxes_with_categories,
+            #         grid_cols=self.ground_truth_generation_settings.grid_cols,
+            #         grid_rows=self.ground_truth_generation_settings.grid_rows,
+            #     )
+            # i += 1
 
         return ground_truths
 
@@ -243,18 +269,23 @@ class PascalVocDataset(Dataset):
             for annotation in image_annotations
         ]
         anchors_with_indices = self._generate_anchors()
-        anchors = list(anchors_with_indices.values())
+        anchors = [
+            tuple(anch) for anch in anchors_with_indices.values()
+        ]  # list(tuple(anchors_with_indices.values()))
         assert (
             len(anchors) == num_anchors
         ), f"Anchor generation failed: generated {len(anchors)}, expected:{num_anchors}"
 
-        iou_matrix = box_iou(anchors, [elem[0] for elem in gt_boxes_with_categories])
+        iou_matrix = box_iou(
+            torch.tensor(anchors),
+            torch.tensor([elem[0] for elem in gt_boxes_with_categories]),
+        )
 
         discarded_col = torch.full((num_anchors,), -1)
         discarded_row = torch.full((num_gt_boxes,), -1)
         anchor_annotation_associations = {}
         for _ in range(num_gt_boxes):
-            max_idx = torch.argmax(iou_matrix)
+            max_idx = torch.argmax(iou_matrix).item()
             gt_box_idx = max_idx % num_gt_boxes
             anchor_idx = max_idx // num_gt_boxes
 
@@ -279,6 +310,19 @@ class PascalVocDataset(Dataset):
                 for k, tile_anchor in enumerate(self._generate_tile_anchors(i, j)):
                     anchors_with_indices[tile_idx * num_anchors + k] = tile_anchor
 
+        # img_path = Path(
+        #     "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\toy_set\\JPEGImages\\2007_000027.jpg"
+        # )
+        # img = Image.open(img_path)
+        # # im_w, im_h = img.size
+
+        # from Lib.Data.DataVisualizer import (
+        #     show_grid_and_anchors_on_image,
+        # )
+
+        # anchors = list(anchors_with_indices.values())
+        # show_grid_and_anchors_on_image(img, anchors, grid_cols=3, grid_rows=3)
+
         return anchors_with_indices
 
     def _generate_tile_anchors(self, i: int, j: int):
@@ -293,6 +337,13 @@ class PascalVocDataset(Dataset):
         Return:
             - List of all anchors associated with that tile in format [x_min, y_min, x_max, y_max].
         """
+
+        # img_path = Path(
+        #     "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\toy_set\\JPEGImages\\2007_000027.jpg"
+        # )
+        # img = Image.open(img_path)
+        # im_w, im_h = img.size
+
         im_w = self.ground_truth_generation_settings.input_image_width
         im_h = self.ground_truth_generation_settings.input_image_height
         rows = self.ground_truth_generation_settings.grid_rows
@@ -300,8 +351,8 @@ class PascalVocDataset(Dataset):
 
         tile_w = im_w // cols
         tile_h = im_h // rows
-        tile_center_x = (2 * j + 1) // 2 * tile_w
-        tile_center_y = (2 * i + 1) // 2 * tile_h
+        tile_center_x = int((2 * j + 1) * (tile_w / 2))
+        tile_center_y = int((2 * i + 1) * (tile_h / 2))
 
         anchors = []
         for anchor_w, anchor_h in zip(
@@ -317,6 +368,11 @@ class PascalVocDataset(Dataset):
                 ]
             )
 
+        # from Lib.Data.DataVisualizer import (
+        #     show_grid_and_anchors_on_image,
+        # )
+
+        # show_grid_and_anchors_on_image(img, anchors, grid_cols=3, grid_rows=3)
         return anchors
 
     def calculate_anchor_offsets(self, anchor, bbox):
@@ -344,6 +400,7 @@ class PascalVocDataset(Dataset):
         x_a = anchor[x_min_idx] + (w_a // 2)
         y_a = anchor[y_min_idx] + (h_a // 2)
 
+        # TODO: what if divisors are 0?
         dx = (((x_gt - x_a) / w_a) - mu_x) / sigma_x
         dy = (((y_gt - y_a) / h_a) - mu_y) / sigma_y
         dw = (log(w_gt / w_a) - mu_w) / sigma_w
@@ -369,35 +426,24 @@ def _read_line_from_file(filepath: Path, line_index: int) -> str:
 
 
 if __name__ == "__main__":
-    TRAIN_DATA_PATH = Path(
-        "C:\\Projects\\Learning\\ObjectDetection_PascalVoc2012\\Datasets\\toy_set"
-    )
-    TRAIN_ANNOTATIONS_PATH = Path(
-        "C:\\Projects\\Learning\\ObjectDetection_PascalVoc2012\\Datasets\\train_val\\Annotations"
-    )
-
-    TEST_DATA_PATH = Path(
-        "C:\\Projects\\Learning\\ObjectDetection_PascalVoc2012\\Data\\test\\JPEGImages"
-    )
-
-    # We transform them to Tensors of normalized range [-1, 1]
-    # transform = transforms.Compose(
-    #     [transforms.ToTensor(), transforms.Normalize((0.5, 0.5), (0.5, 0.5))]
-    # )
-    # dataset_path: Path, annotations_path: Path, dataset_name: str, transform
     TOY_TRAIN_DATA_PATH = Path(
-        "C:\\Projects\\Learning\\ObjectDetection_PascalVoc2012\\Datasets\\toy_set"
+        "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\one_img_set"
     )
     TRAIN_ANNOTATIONS_PATH = Path(
-        "C:\\Projects\\Learning\\ObjectDetection_PascalVoc2012\\Datasets\\train_val\\Annotations"
+        "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\one_img_set\\Annotations"
     )
 
     gt_settings = GroundTruthGenerationSettings(
-        ground_truth_path=Path(), anchor_widths=[7, 11, 13], anchor_heights=[7, 11, 13]
+        ground_truth_path=Path(),
+        anchor_widths=sizes,
+        anchor_heights=sizes,
+        generate_ground_truth=True,
+        input_image_height=281,
+        input_image_width=500,
     )
     transform = transforms.Compose(
         [
-            transforms.ToTensor(),
+            # transforms.ToTensor(),
             transforms.Resize(
                 size=(
                     GroundTruthGenerationSettings.input_image_height,
@@ -410,16 +456,9 @@ if __name__ == "__main__":
         TOY_TRAIN_DATA_PATH,
         TRAIN_ANNOTATIONS_PATH,
         gt_settings,
-        "train_val",
-        transform=transform,
+        "toy_set",
+        transform=None,  # transform,
     )
-    # test_dataset = PascalVocDataset(TEST_DATA_PATH, transform)
 
-    # train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-
-    # for i, sample in enumerate(train_dataset):
-    #     img, annotations = sample
-
-    #     show_image_with_annotations(img, annotations)
-    #     if i == 3:
-    #         break
+    # train_dataset._generate_tile_anchors(0, 2)  # --> works well!
+    # train_dataset._generate_anchors()  # --> works well!
