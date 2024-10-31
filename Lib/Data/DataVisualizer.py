@@ -5,7 +5,12 @@ import matplotlib.patches as patches
 from PIL import Image
 from typing import Any, List
 
-from Annotation import Annotation, BoundingBox, parse_xml_image_annotations
+from Annotation import (
+    Annotation,
+    BoundingBox,
+    parse_xml_image_annotations,
+    ImageAnnotations,
+)
 
 
 COLOR = {
@@ -33,7 +38,7 @@ def show_image(image_path: Path):
 
 
 def show_image_on_path_with_annotations(
-    image_path: Path, annotations: List[Annotation]
+    image_path: Path, annotations: ImageAnnotations
 ):
     if not image_path.exists():
         exit(f"Image not found: {image_path}. Aborting.")
@@ -43,7 +48,7 @@ def show_image_on_path_with_annotations(
     show_image_with_annotations(image, annotations)
 
 
-def show_image_with_annotations(image: Any, annotations: List[Annotation]):
+def show_image_with_annotations(image: Any, annotations: ImageAnnotations):
     # Create a figure and axis
     fig, ax = plt.subplots()
     # Display the image

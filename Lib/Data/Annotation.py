@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import auto
 from lxml import etree
 from pathlib import Path
-from typing import List
+from typing import List, TypeAlias
 from strenum import StrEnum
 
 
@@ -115,8 +115,15 @@ class Annotation:
             and 0 <= self.bbox.y_min < self.bbox.y_max <= self.image_properties.height
         )
 
+    def _transfrom_annotation(self, transform):  # TODO: add type.
 
-def parse_xml_image_annotations(annotation_path: Path) -> List[Annotation]:
+        pass
+
+
+ImageAnnotations: TypeAlias = List[Annotation]
+
+
+def parse_xml_image_annotations(annotation_path: Path) -> ImageAnnotations:
     if not annotation_path.exists():
         raise FileNotFoundError
 

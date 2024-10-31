@@ -3,7 +3,7 @@ from math import log
 from pathlib import Path
 from PIL import Image
 from torch.utils.data import Dataset, DataLoader
-from typing import List
+from typing import List, Type, TypeAlias
 
 from torchvision.ops import box_iou
 import torch
@@ -12,8 +12,18 @@ import numpy as np
 import pandas as pd
 import linecache
 
-from Lib.Data.Annotation import Annotation, Category, parse_xml_image_annotations
+# from Lib.Data.Annotation import ImageAnnotations
+
+from Lib.Data.Annotation import (
+    Annotation,
+    Category,
+    parse_xml_image_annotations,
+    ImageAnnotations,
+)
+
+# ImageAnnotations: TypeAlias = list[Annotation]
 from Lib.Data.DataVisualizer import show_image_with_annotations
+import Transforms
 
 CATEGORIES_IDS = {ctg.value: i for i, ctg in enumerate(Category)}
 
@@ -38,9 +48,12 @@ class GroundTruth:
 @dataclass
 class GroundTruthGenerationSettings:
     ground_truth_path: Path
+    images_path: Path
     num_anchors: int = 3
     num_classes: int = 20
     generate_ground_truth: bool = True
+    write_images_and_annotations: bool = True
+    "Set to true when original data is meant to be transformed. Not useful otherwise."
     overwrite_existing_ground_truth: bool = True
     anchor_association_iou_threshold: float = 0.35
     grid_rows: int = 3
@@ -65,6 +78,8 @@ class GroundTruthGenerationSettings:
         if self.generate_ground_truth:
             try:
                 self.ground_truth_path.mkdir(parents=True, exist_ok=True)
+                gt_dir = self.ground_truth_path / "GroundTruth"
+                gt_dir.mkdir(parents=True, exist_ok=True)
             except PermissionError:
                 print(
                     f"Ground Truth Generation: You don't have the permission to create {self.ground_truth_path}"
@@ -72,6 +87,22 @@ class GroundTruthGenerationSettings:
                 exit()
             except OSError as e:
                 print(f"Ground Truth Generation: An OS error occurred: {e}.")
+                exit()
+
+        if self.write_images_and_annotations:  # TODO: update the try statement
+            try:
+                self.ground_truth_path.mkdir(parents=True, exist_ok=True)
+                images_dir = self.ground_truth_path / "Images"
+                labels_dir = self.ground_truth_path / "Annotations"
+                images_dir.mkdir(parents=True, exist_ok=True)
+                labels_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                print(
+                    f"Ground Truth Generation (Images): You don't have the permission to create {self.images_path}"
+                )
+                exit()
+            except OSError as e:
+                print(f"Ground Truth Generation (Images): An OS error occurred: {e}.")
                 exit()
 
         assert (
@@ -90,20 +121,22 @@ class PascalVocDataset(Dataset):
     # TODO: write tests! Some class methods are quite tricky and error-prone.
     def __init__(
         self,
-        dataset_path: Path,
+        images_path: Path,
         annotations_path: Path,
         ground_truth_generation_settings: GroundTruthGenerationSettings,
         dataset_name: str,
-        transform=None,
+        transform: Type[Transforms.TransformWrapper] = None,
     ):
-        if not dataset_path.exists() or not annotations_path.exists():
-            raise FileNotFoundError
+        if not images_path.exists() or not annotations_path.exists():
+            raise FileNotFoundError(
+                f"Dataset {dataset_name} initialization failed - provided dataset or annotation files invalid."
+            )
 
-        self.dataset_path: Path = dataset_path  # JPEG images
+        self.images_path: Path = images_path  # JPEG images
         self.annotations_path: Path = annotations_path
-        self.filelist: Path = self._create_filelist(dataset_name)
-        self.img_labels: List[List[Annotation]] = self._get_labels()
         self.transform = transform
+        self.filelist: Path = self._create_filelist(dataset_name)
+        self.img_labels: List[ImageAnnotations] = self._get_labels()
         self.ground_truth_generation_settings: GroundTruthGenerationSettings = (
             ground_truth_generation_settings
         )
@@ -111,19 +144,22 @@ class PascalVocDataset(Dataset):
         if self.ground_truth_generation_settings.generate_ground_truth:
             self.ground_truth = self._generate_ground_truth()
 
+        if self.ground_truth_generation_settings.write_images_and_annotations:
+            self.write_images()
+            self.write_annotations()
+
     def __len__(self):
         return len(self.img_labels)
 
     def __getitem__(self, idx):
+        # TODO: add functionality to read from transformed folders if available.
         label = self.img_labels[idx]
 
-        # linecache.clearcache()
-        # img_name = linecache.getline(str(self.filelist), idx)
         img_name = _read_line_from_file(self.filelist, idx)
         if img_name == "":
             raise ValueError(f"Could not get item at index {idx}")
 
-        img_path = self.dataset_path / f"{img_name[:-1]}.jpg"
+        img_path = self.images_path / f"{img_name[:-1]}.jpg"
 
         img = Image.open(img_path)
         if self.transform:
@@ -132,20 +168,30 @@ class PascalVocDataset(Dataset):
 
         return img, label
 
-    def _get_labels(self) -> List[List[Annotation]]:
+    def _get_labels(self) -> List[ImageAnnotations]:
         """
         TODO:
             - add doc-string
             - think about returning a generator instead of a list.
         """
-
         labels = []
         with open(self.filelist, "r") as f:
             for img_name in f:
                 if img_name == "":
                     break
                 annotations_path = self.annotations_path / f"{img_name[:-1]}.xml"
-                labels.append(parse_xml_image_annotations(annotations_path))
+                img_annotations: ImageAnnotations = parse_xml_image_annotations(
+                    annotations_path
+                )
+                if self.transform:
+                    transformed_annotations = []
+                    for ann in img_annotations:
+                        transformed_annotations.append(
+                            self.transform(ann)
+                            # self.transform.transform_annotation(ann)
+                        )
+                    img_annotations = transformed_annotations
+                labels.append(img_annotations)
 
         return labels
 
@@ -159,7 +205,7 @@ class PascalVocDataset(Dataset):
             Path.cwd() / f"{dataset_name}.txt"
         )  # TODO: Think about how to make this path "standard".
 
-        img_paths = self.dataset_path.rglob("*.jpg")
+        img_paths = self.images_path.rglob("*.jpg")
         with open(filelist_path, "w+") as f:
             for pth in img_paths:
                 img_name = pth.stem
@@ -173,7 +219,6 @@ class PascalVocDataset(Dataset):
         TODO: update this doc-string.
         For each object in each image, we calculate ground truth generated for that object.
         """
-        # TODO: if transforms are set, ground truth will also need to be transformed.
         negative_anchor_gt = np.zeros(
             1 + 4 + self.ground_truth_generation_settings.num_classes
         )
@@ -194,6 +239,7 @@ class PascalVocDataset(Dataset):
             )  # (1 + 4 + num_classes) * list of size num_anchors * grid_rows * grid_cols
 
             # Calculate the ground truth vector for image
+            # TODO: check ground truth generation!
             for anchor_idx in range(total_num_anchors):
                 if anchor_idx not in anchors_gt_boxes_with_categories.keys():
                     img_gt.extend(negative_anchor_gt)
@@ -221,28 +267,37 @@ class PascalVocDataset(Dataset):
                 img_gt.extend(class_confidences)
 
             ground_truths.append(img_gt)
-            # if i < 1:
-            #     from Lib.Data.DataVisualizer import (
-            #         show_annotations_on_image_with_grid_and_associated_anchors,
-            #     )
-
-            #     img_dir = Path(
-            #         "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\toy_set\\JPEGImages"
-            #     )
-            #     img = Image.open(img_dir / labels[0].image_properties.name)
-            #     if self.transform:
-            #         img = self.transform(img)
-            #     show_annotations_on_image_with_grid_and_associated_anchors(
-            #         img,
-            #         anchor_annotation_pairs=anchors_gt_boxes_with_categories,
-            #         grid_cols=self.ground_truth_generation_settings.grid_cols,
-            #         grid_rows=self.ground_truth_generation_settings.grid_rows,
-            #     )
-            # i += 1
 
         return ground_truths
 
-    def find_anchor_annotation_associations(self, image_annotations: List[Annotation]):
+    def write_images(self):
+        """Write (transformed) images to a location on the drive.
+
+        The purpose of this function is to store the (transformed) images on the disk to offer the possibility
+        of avoiding uneccessary transformation during every run.
+
+        Returns:
+            - stores images to self.ground_truth_generation_settings.ground_truth_path / 'Images'.
+        """
+        with open(self.filelist, "r") as f:
+            for img_name in f:
+                if img_name == "\n":
+                    continue
+
+                img_path = self.images_path / f"{img_name[:-1]}.jpg"
+                img = Image.open(img_path)
+                if self.transform:
+                    img = self.transform(img)
+                    img.save(
+                        self.ground_truth_generation_settings.ground_truth_path
+                        / "Images"
+                        / f"{img_name[:-1]}.jpg"
+                    )
+
+    def write_annotations(self):
+        pass
+
+    def find_anchor_annotation_associations(self, image_annotations: ImageAnnotations):
         """Associate each ground truth bounding box with an anchor.
 
         TODO: update this doc-string and describe the algorithm.
@@ -426,39 +481,60 @@ def _read_line_from_file(filepath: Path, line_index: int) -> str:
 
 
 if __name__ == "__main__":
-    TOY_TRAIN_DATA_PATH = Path(
+    ONEIMG_TRAIN_DATA_PATH = Path(
         "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\one_img_set"
     )
+    ONEIMG_TRAIN_ANNOTATIONS_PATH = Path(
+        "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\one_img_set\\Annotations"
+    )
+
+    TOY_TRAIN_IMAGES_PATH = Path(
+        "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\toy_set\\JPEGImages"
+    )
+    TOY_TRAIN_ANNOTATIONS_PATH = Path(
+        "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\toy_set\\Annotations"
+    )
+
     TRAIN_ANNOTATIONS_PATH = Path(
         "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\one_img_set\\Annotations"
     )
 
     gt_settings = GroundTruthGenerationSettings(
-        ground_truth_path=Path(),
+        ground_truth_path=Path(
+            "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\toy_set\\GroundTruth"
+        ),
+        images_path=Path(
+            "C:\\Projects\\ObjectDetection_PascalVoc2012\\Datasets\\toy_set\\JPEGImages"
+        ),
         anchor_widths=sizes,
         anchor_heights=sizes,
         generate_ground_truth=True,
-        input_image_height=281,
-        input_image_width=500,
+        input_image_height=180,
+        input_image_width=180,
     )
     transform = transforms.Compose(
         [
             # transforms.ToTensor(),
-            transforms.Resize(
-                size=(
-                    GroundTruthGenerationSettings.input_image_height,
-                    GroundTruthGenerationSettings.input_image_width,
-                )
+            Transforms.Resize(
+                gt_settings.input_image_height,
+                gt_settings.input_image_width,
             ),
         ]
     )
+    # transform = Transforms.Resize(
+    #     gt_settings.input_image_height,
+    #     gt_settings.input_image_width,
+    # )
     train_dataset = PascalVocDataset(
-        TOY_TRAIN_DATA_PATH,
-        TRAIN_ANNOTATIONS_PATH,
-        gt_settings,
-        "toy_set",
-        transform=None,  # transform,
+        images_path=TOY_TRAIN_IMAGES_PATH,
+        annotations_path=TOY_TRAIN_ANNOTATIONS_PATH,
+        ground_truth_generation_settings=gt_settings,
+        dataset_name="toy_set",
+        transform=transform,
     )
 
+    for i in range(0, len(train_dataset)):
+        img, label = train_dataset.__getitem__(i)
+        show_image_with_annotations(img, label)
     # train_dataset._generate_tile_anchors(0, 2)  # --> works well!
     # train_dataset._generate_anchors()  # --> works well!
