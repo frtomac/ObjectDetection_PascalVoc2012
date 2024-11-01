@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from PIL import Image
 from typing import Any, List
+from torch import Tensor
+from torchvision.transforms import ToPILImage
 
 from Annotation import (
     Annotation,
@@ -29,7 +31,7 @@ color_values = list(COLOR.values())
 color_values = [(val[0] / 255, val[1] / 255, val[2] / 255) for val in color_values]
 
 
-def show_image(image_path: Path):
+def show_image_on_path(image_path: Path):
     if not image_path.exists():
         exit(f"Image not found: {image_path}. Aborting.")
 
@@ -49,6 +51,10 @@ def show_image_on_path_with_annotations(
 
 
 def show_image_with_annotations(image: Any, annotations: ImageAnnotations):
+
+    if isinstance(image, Tensor):
+        image = ToPILImage()(image)
+
     # Create a figure and axis
     fig, ax = plt.subplots()
     # Display the image
@@ -81,6 +87,9 @@ def show_image_with_annotations(image: Any, annotations: ImageAnnotations):
 def show_annotations_on_image_with_grid_and_associated_anchors(
     img, anchor_annotation_pairs, grid_cols, grid_rows
 ):
+    if isinstance(image, Tensor):
+        image = ToPILImage()(image)
+
     # Create a figure and axis
     fig, ax = plt.subplots()
     # Display the image
@@ -142,6 +151,9 @@ def show_annotations_on_image_with_grid_and_associated_anchors(
 
 
 def show_grid_and_anchors_on_image(img, anchors, grid_cols=3, grid_rows=3):
+
+    if isinstance(image, Tensor):
+        image = ToPILImage()(image)
     # Create a figure and axis
     fig, ax = plt.subplots()
 
@@ -172,41 +184,6 @@ def show_grid_and_anchors_on_image(img, anchors, grid_cols=3, grid_rows=3):
         ax.add_patch(rect)
 
     plt.show()
-
-
-# def _add_bbox_to_image_plot(image, bbox: Union[BoundingBox, List[int, int, int, int]]):
-#     """TBA."""
-
-#     im_name = root.find("filename").text
-
-#     # Load the image
-#     image_path = PROJECT_DIR / f"Datasets/train_val/JPEGImages/{im_name}"
-#     image = Image.open(image_path)
-
-#     # Create a figure and axis
-#     fig, ax = plt.subplots()
-
-#     # Display the image
-#     ax.imshow(image)
-
-#     # Define the bounding box coordinates (x, y, width, height)
-#     bbox = [50, 50, 100, 150]  # Example coordinates
-
-#     # Create a rectangle patch
-#     rect = patches.Rectangle(
-#         (bbox[0], bbox[1]),
-#         bbox[2],
-#         bbox[3],
-#         linewidth=2,
-#         edgecolor="r",
-#         facecolor="none",
-#     )
-
-#     # Add the rectangle to the plot
-#     ax.add_patch(rect)
-
-#     # Show the plot
-#     plt.show()
 
 
 if __name__ == "__main__":

@@ -14,12 +14,7 @@ import numpy.typing
 import pandas as pd
 
 from Lib.Data.Annotation import Annotation, BoundingBox
-
-
-class ImageOrAnnotationTypeNotSupportedException(Exception):
-    """Custom exception thrown when image or annotation type is not supported."""
-
-    pass
+from Lib.Exceptions import ImageOrAnnotationTypeNotSupportedException
 
 
 class TransformWrapper(abc.ABC):
@@ -32,13 +27,23 @@ class TransformWrapper(abc.ABC):
     def __call__(self, img):
         if isinstance(img, Annotation):
             return self.transform_annotation(img)
-        elif isinstance(img, Image.Image):
+        elif isinstance(img, Image.Image) or isinstance(img, torch.Tensor):
             return self.transform(img)
-        raise ImageOrAnnotationTypeNotSupportedException
+        raise ImageOrAnnotationTypeNotSupportedException(
+            f"Expected type Annotation or PIL Image. Received: {type(img)}"
+        )
 
     @abc.abstractmethod
-    def transform_annotation(self, annotations: Annotation) -> Any:
+    def transform_annotation(self, annotations: Annotation) -> Annotation:
         raise NotImplementedError
+
+
+class ToTensor(TransformWrapper):
+    def __init__(self):
+        self.transform = transforms.ToTensor()
+
+    def transform_annotation(self, annotation: Annotation):
+        return annotation
 
 
 class Resize(TransformWrapper):
@@ -46,9 +51,6 @@ class Resize(TransformWrapper):
         self.new_h = new_h
         self.new_w = new_w
         self.transform = transforms.Resize(size=(new_h, new_w))
-
-    # def __call__(self, img):
-    #     return super.__call__(img)
 
     def transform_annotation(self, annotation: Annotation) -> Annotation:
         im_w = annotation.image_properties.width
@@ -69,6 +71,11 @@ class Resize(TransformWrapper):
         )
 
 
-class ToTensor(TransformWrapper):
+class Normalize(TransformWrapper):
+    def __init__(
+        self, mean: List[float] = [0.5, 0.5, 0.5], std: List[float] = [0.5, 0.5, 0.5]
+    ):
+        self.transform = transforms.Normalize(mean=mean, std=std)
+
     def transform_annotation(self, annotation: Annotation):
         return annotation
