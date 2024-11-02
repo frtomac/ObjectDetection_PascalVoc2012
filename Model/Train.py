@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchsummary import summary
 import torchvision.transforms as transforms
-from torchvision.ops import complete_box_iou_loss
+from torchvision.ops import ciou_loss  # complete_box_iou_loss
 from pathlib import Path
 from typing import List, Tuple
 
@@ -59,13 +59,13 @@ def train(
 
     num_epochs = 1
     batch_size = 3
-    learning_rate = 0.001
+    learning_rate = 0.08
 
     model = Detector().to(device)
     summary(model, input_size=(3, input_img_h, input_img_w), batch_size=batch_size)
 
     criterion_existence_prob = nn.CrossEntropyLoss()
-    criterion_bbox_regression = complete_box_iou_loss()
+    criterion_bbox_regression = nn.MSELoss()
     criterion_classes = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
@@ -77,85 +77,69 @@ def train(
         running_loss = 0.0
 
         for i, (batch_images, batch_ground_truths) in enumerate(train_dataloader):
-            batch_images = batch_images.to(device)
-            batch_ground_truths = batch_ground_truths.to(device)
+            batch_images = batch_images.to(torch.float32).to(device)
 
             # Forward pass
-            batch_outputs = model(batch_images)
+            (
+                batch_output_existence,
+                batch_output_bbox_offsets,
+                batch_output_classes,
+            ) = model(batch_images)
+            batch_output_existence = batch_output_existence.to(torch.float32)
+            batch_output_bbox_offsets = batch_output_bbox_offsets.to(torch.float32)
+            batch_output_classes = batch_output_classes.to(torch.float32)
 
-            output_existence, output_bbox_regression, output_classes = (
-                _unpack_batch_model_output(
-                    batch_outputs, num_classes, grid_cols, grid_rows, num_anchors
-                )
+            """
+            ground_truths = {
+            "existence_probs": [],
+            "bbox_offsets": [],
+            "class_confidences": [],
+            """
+
+            batch_gt_existence_probs = [
+                ex_probs.to(torch.float32).to(device)
+                for ex_probs in batch_ground_truths["existence_probs"]
+            ]
+            batch_gt_existence_probs = torch.stack(batch_gt_existence_probs, dim=1)
+
+            batch_gt_bbox_offsets = [
+                offsets.to(torch.float32).to(device)
+                for offsets in batch_ground_truths["bbox_offsets"]
+            ]
+            batch_gt_bbox_offsets = torch.stack(batch_gt_bbox_offsets, dim=1)
+
+            batch_gt_class_confidences = [
+                conf.to(torch.float32).to(device)
+                for conf in batch_ground_truths["class_confidences"]
+            ]
+            batch_gt_class_confidences = torch.stack(batch_gt_class_confidences, dim=1)
+
+            loss_existence_prob = criterion_existence_prob(
+                batch_output_existence, batch_gt_existence_probs
             )
-            # annotations_existence = ...
-            # annotations_bbox_regression = ...
-            # annotations_classes = ...
-            # loss_existence_prob = criterion_existence_prob(
-            #     output_existence, annotations_existence
-            # )
-            # loss_bbox_regression = criterion_bbox_regression(
-            #     output_bbox_regression, annotations_bbox_regression
-            # )
-            # loss_classes = criterion_classes(output_classes, annotations_classes)
+            loss_bbox_regression = criterion_bbox_regression(
+                batch_output_bbox_offsets, batch_gt_bbox_offsets
+            )
+            loss_classes = criterion_classes(
+                batch_output_classes, batch_gt_class_confidences
+            )
 
-            # # Backward and optimize
-            # loss.backward()
-            # optimizer.step()
-            # optimizer.zero_grad()
+            total_loss = (loss_existence_prob + loss_bbox_regression + loss_classes).to(
+                torch.float32
+            )
+            # Backward and optimize
+            # total_loss = total_loss.to(torch.float32)<
+            total_loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
 
-            # running_loss += loss.item()
+            running_loss += total_loss.item()
 
-        # print(f"[{epoch + 1}] loss: {running_loss / n_total_steps:.3f}")
+        print(f"[{epoch + 1}] loss: {running_loss / n_total_steps:.3f}")
 
     print("Finished Training")
     PATH = Path("cnn.pth")
     torch.save(model.state_dict(), PATH)
-
-
-def _unpack_batch_model_output(
-    outputs: List, num_classes, grid_cols, grid_rows, num_anchors
-):
-    existence_probs = []
-    offsets = []
-    class_confs = []
-    for batch_output in outputs:  # TODO: check this!
-        one_batch_probs, one_batch_offsets, one_batch_confs = _unpack_model_output(
-            batch_output, num_classes, grid_cols, grid_rows, num_anchors
-        )
-
-        existence_probs.append(one_batch_probs)
-        offsets.append(one_batch_offsets)
-        class_confs.append(one_batch_confs)
-
-    return existence_probs, offsets, class_confs
-
-
-def _unpack_model_output(
-    output: List, num_classes, grid_cols, grid_rows, num_anchors
-) -> Tuple[List, List, List]:
-    """Unpacks the model output vector and returns existence probabilities, box offsets and class confidences."""
-
-    assert len(output) == (1 + 4 + num_classes) * grid_rows * grid_cols * num_anchors
-
-    one_anchor_gt_len = 1 + 4 + num_classes
-
-    existence_probs = [
-        output[i * one_anchor_gt_len]
-        for i in range(0, grid_rows * grid_cols * num_anchors)
-    ]
-    box_offsets = []
-    for i in range(0, grid_rows * grid_cols * num_anchors):
-        box_offsets.extend(
-            output[1 + i * one_anchor_gt_len : 5 + i * one_anchor_gt_len]
-        )
-    class_confs = []
-    for i in range(0, grid_rows * grid_cols * num_anchors):
-        class_confs.extend(
-            output[5 + i * one_anchor_gt_len : (i + 1) * one_anchor_gt_len]
-        )
-
-    return existence_probs, box_offsets, class_confs
 
 
 if __name__ == "__main__":

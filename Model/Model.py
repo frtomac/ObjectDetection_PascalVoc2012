@@ -34,49 +34,29 @@ class Detector(nn.Module):
             nn.MaxPool2d(kernel_size=2, stride=2, padding=0),
         )
 
-        self.existence_prob = nn.Sequential(
-            nn.Linear(
-                in_features=1 * 64 * 43 * 43,
-                out_features=(1 + 4 + num_classes)
-                * grid_rows
-                * grid_cols
-                * num_anchors,
-            ),
-            nn.ReLU(inplace=True),
-            nn.Linear(
-                (1 + 4 + num_classes) * grid_rows * grid_cols * num_anchors, 1
-            ),  # Single output for existence probability
-            nn.Sigmoid(),
+        self.existence_prob = (
+            nn.Sequential(  # output size: grid_rows * grid_cols * num_anchors
+                nn.Linear(
+                    in_features=1 * 64 * 43 * 43,
+                    out_features=grid_rows * grid_cols * num_anchors,
+                ),
+                nn.Sigmoid(),
+            )
         )
 
         self.bbox_regressor = nn.Sequential(
             nn.Linear(
                 in_features=1 * 64 * 43 * 43,
-                out_features=(1 + 4 + num_classes)
-                * grid_rows
-                * grid_cols
-                * num_anchors,
-            ),
-            nn.ReLU(inplace=True),
-            nn.Linear(
-                in_features=(1 + 4 + num_classes) * grid_rows * grid_cols * num_anchors,
-                out_features=4,
+                out_features=4 * grid_rows * grid_cols * num_anchors,
             ),
         )
 
         self.classifier = nn.Sequential(
             nn.Linear(
                 in_features=1 * 64 * 43 * 43,
-                out_features=(1 + 4 + num_classes)
-                * grid_rows
-                * grid_cols
-                * num_anchors,
+                out_features=num_classes * grid_rows * grid_cols * num_anchors,
             ),
-            nn.ReLU(),
-            nn.Linear(
-                in_features=(1 + 4 + num_classes) * grid_rows * grid_cols * num_anchors,
-                out_features=num_classes,
-            ),
+            nn.Sigmoid(),
         )
 
     def forward(self, x):

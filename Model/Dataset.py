@@ -156,7 +156,11 @@ class PascalVocDataset(Dataset):
         one_img_gt_len = (
             1 + 4 + self.ground_truth_generation_settings.num_classes
         ) * total_num_anchors
-        ground_truth = self.ground_truths[idx * one_img_gt_len]
+        ground_truth = {
+            "existence_probs": self.ground_truths["existence_probs"][idx],
+            "bbox_offsets": self.ground_truths["bbox_offsets"][idx],
+            "class_confidences": self.ground_truths["class_confidences"][idx],
+        }
 
         img_name = _read_line_from_file(self.filelist, idx)
         if img_name == "":
@@ -165,7 +169,7 @@ class PascalVocDataset(Dataset):
         if self.transformed_images_path != None:
             img_path = self.transformed_images_path / f"{img_name[:-1]}.jpg"
             img = Image.open(img_path)
-            img = Transforms.ToTensor(img)
+            img = Transforms.ToTensor()(img)
 
             return img, ground_truth
 
@@ -220,15 +224,18 @@ class PascalVocDataset(Dataset):
 
         return filelist_path
 
-    def _generate_ground_truth(self) -> List:
+    # TODO: update return types and doc-string. Think about using a class for the return value here.
+    def _generate_ground_truth(self):
         """For each object in each image, calculate the ground truth vector corresponding to that object.
 
         Return:
             - List of ground truth vectors for each image, where each vector consists of
             (1 + 4 + num_classes) * grid_cols * grid_rows * num_anchors_per_grid_cell elements.
         """
-        negative_anchor_gt = np.zeros(
-            1 + 4 + self.ground_truth_generation_settings.num_classes
+        negative_anchor_existence_prob = 0
+        negative_anchor_offsets = [-1.0, -1.0, -1.0, -1.0]
+        negative_anchor_classes = np.zeros(
+            self.ground_truth_generation_settings.num_classes
         )
         total_num_anchors = (
             self.ground_truth_generation_settings.grid_cols
@@ -236,20 +243,25 @@ class PascalVocDataset(Dataset):
             * self.ground_truth_generation_settings.num_anchors
         )
 
-        ground_truths = []
+        ground_truths = {
+            "existence_probs": [],
+            "bbox_offsets": [],
+            "class_confidences": [],
+        }
         for labels in self.img_labels:  # labels = annotations for one image
             anchors_gt_boxes_with_categories = self.find_anchor_annotation_associations(
                 labels
             )
-            img_gt = (
-                []
-            )  # (1 + 4 + num_classes) * list of size num_anchors * grid_rows * grid_cols
-
-            # Calculate the ground truth vector for image
+            img_existence_probs = []
+            img_bbox_offsets = []
+            img_class_confidences = []
+            # Calculate ground truth for the image associated with the labels
             for anchor_idx in range(total_num_anchors):
                 if anchor_idx not in anchors_gt_boxes_with_categories.keys():
-                    img_gt.extend(negative_anchor_gt)
-                    ground_truths.append(img_gt)
+                    img_existence_probs.append(negative_anchor_existence_prob)
+                    img_bbox_offsets.extend(negative_anchor_offsets)
+                    img_class_confidences.extend(negative_anchor_classes)
+
                     continue
 
                 # Anchor is associated with some annotated ground truth box
@@ -268,11 +280,14 @@ class PascalVocDataset(Dataset):
                 class_idx = CATEGORIES_IDS[associated_gt_box_and_category[1]]
                 class_confidences[class_idx] = 1.0
 
-                img_gt.append(existence_prob)
-                img_gt.extend(anchor_offset)
-                img_gt.extend(class_confidences)
+                img_existence_probs.append(existence_prob)
+                img_bbox_offsets.extend(anchor_offset)
+                img_class_confidences.extend(class_confidences)
 
-            ground_truths.append(img_gt)
+            # ground_truths.append(img_gt)
+            ground_truths["existence_probs"].append(img_existence_probs)
+            ground_truths["bbox_offsets"].append(img_bbox_offsets)
+            ground_truths["class_confidences"].append(img_class_confidences)
 
         return ground_truths
 
