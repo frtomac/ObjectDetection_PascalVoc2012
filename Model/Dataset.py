@@ -134,7 +134,7 @@ class PascalVocDataset(Dataset):
         self.filelist: Path = self._create_filelist(dataset_name)
         self.img_labels: List[ImageAnnotations] = self._get_labels()
 
-        self.ground_truth = self._generate_ground_truth()
+        self.ground_truths = self._generate_ground_truth()
 
         if self.ground_truth_generation_settings.write_images_and_annotations:
             self.transformed_images_path = (
@@ -148,20 +148,34 @@ class PascalVocDataset(Dataset):
         return len(self.img_labels)
 
     def __getitem__(self, idx):
-        label = self.img_labels[idx]
+        total_num_anchors = (
+            self.ground_truth_generation_settings.grid_cols
+            * self.ground_truth_generation_settings.grid_cols
+            * self.ground_truth_generation_settings.num_anchors
+        )
+        one_img_gt_len = (
+            1 + 4 + self.ground_truth_generation_settings.num_classes
+        ) * total_num_anchors
+        ground_truth = self.ground_truths[idx * one_img_gt_len]
 
         img_name = _read_line_from_file(self.filelist, idx)
         if img_name == "":
             raise ValueError(f"Could not get item at index {idx}")
 
-        img_path = self.images_path / f"{img_name[:-1]}.jpg"
+        if self.transformed_images_path != None:
+            img_path = self.transformed_images_path / f"{img_name[:-1]}.jpg"
+            img = Image.open(img_path)
+            img = Transforms.ToTensor(img)
 
+            return img, ground_truth
+
+        img_path = self.images_path / f"{img_name[:-1]}.jpg"
         img = Image.open(img_path)
         if self.transform:
             img = self.transform(img)
             # Labels were automatically transformed while generated in self._get_labels.
 
-        return img, label
+        return img, ground_truth
 
     def _get_labels(self) -> List[ImageAnnotations]:
         """Get parsed annotations (labels) for all the images in the dataset.
