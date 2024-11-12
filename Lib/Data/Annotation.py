@@ -79,6 +79,18 @@ class BoundingBox:
     def __str__(self):
         return f"(x_min, y_min) = ({self.x_min}, {self.y_min}), (x_max, y_max) = ({self.x_max}, {self.y_max})."
 
+    def _bbox_is_valid(self, im_w, im_h) -> bool:
+        """Verify bounding box
+
+        Return:
+            - True if 0 <= x_min < x_max <= image_width and 0 <= y_min < y_max <= image_height
+            - False otherwise.
+        """
+        return (
+            0 <= self.x_min < self.x_max <= im_w
+            and 0 <= self.y_min < self.y_max <= im_h
+        )
+
 
 @dataclass
 class Annotation:
@@ -98,22 +110,12 @@ class Annotation:
                 f"Annotations for file {self.image_properties.name} contain an invalid category: {category}."
             )
 
-        if not self._bbox_is_valid():
+        if not self.bbox._bbox_is_valid(
+            self.image_properties.width, self.image_properties.height
+        ):
             raise InvalidBoundingBoxException(
                 f"Annotations for file {self.image_properties.name} contain an invalid bounding box: {self.bbox}."
             )
-
-    def _bbox_is_valid(self) -> bool:
-        """Verify bounding box
-
-        Return:
-            - True if 0 <= x_min < x_max <= image_width and 0 <= y_min < y_max <= image_height
-            - False otherwise.
-        """
-        return (
-            0 <= self.bbox.x_min < self.bbox.x_max <= self.image_properties.width
-            and 0 <= self.bbox.y_min < self.bbox.y_max <= self.image_properties.height
-        )
 
     def _transfrom_annotation(self, transform):  # TODO: add type.
 
@@ -121,6 +123,30 @@ class Annotation:
 
 
 ImageAnnotations: TypeAlias = List[Annotation]
+
+
+@dataclass
+class Detection:
+    category: Category
+    bbox: BoundingBox
+    existence_probability: float
+
+    def __init__(
+        self, category: Category, bbox: BoundingBox, existance_prob: float = 0.0
+    ):
+        self.category = category
+        self.bbox = bbox
+        self.existence_probability = existance_prob
+
+        if not Category.has_value(category):
+            raise InvalidCategoryException(
+                f"Invalid category for detection: {category}."
+            )
+
+        # TODO: Add checks for bbox? How to pass image dimensions?
+
+
+ImageDetections: TypeAlias = List[Detection]
 
 
 def parse_xml_image_annotations(annotation_path: Path) -> ImageAnnotations:

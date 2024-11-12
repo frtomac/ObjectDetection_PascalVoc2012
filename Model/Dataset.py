@@ -23,6 +23,7 @@ from Lib.Data.Annotation import (
 
 # ImageAnnotations: TypeAlias = list[Annotation]
 from Lib.Data.DataVisualizer import show_image_with_annotations
+from Lib import GroundTruthCalculations
 import Transforms
 
 CATEGORIES_IDS = {ctg.value: i for i, ctg in enumerate(Category)}
@@ -160,6 +161,7 @@ class PascalVocDataset(Dataset):
             "existence_probs": self.ground_truths["existence_probs"][idx],
             "bbox_offsets": self.ground_truths["bbox_offsets"][idx],
             "class_confidences": self.ground_truths["class_confidences"][idx],
+            "annotations": self.img_labels[idx],
         }
 
         img_name = _read_line_from_file(self.filelist, idx)
